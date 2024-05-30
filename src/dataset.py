@@ -15,16 +15,27 @@ ds2task_ids = {
 }
 
 class Dataset(torch.utils.data.Dataset):
-    def __init__(self, ids, root, img_ext, mask_ext, num_classes, transform=None):
+    def __init__(self, ids, root, img_ext, mask_ext, num_classes, mode, transform=None):
         self.imgs    = ids['images']
         self.labels  = ids['labels']
         self.root = root,
         self.num_classes = num_classes
         self.transform = transform
-
+        self.mode
+        
     def __len__(self):
         return len(self.imgs)
 
+    def get_boundary_map(self, gt):
+        #gt = cv2.resize(gt, (352, 352))
+        #gt = cv2.cvtColor(gt, cv2.COLOR_BGR2GRAY)
+        gt = gt[:,:,0]                                  # [256,256,1] -> [256,256]
+        dis = ndi.distance_transform_edt(gt)
+        dis_in = ndi.distance_transform_edt(1-gt)
+        dis[gt == 0] = dis_in[gt == 0]
+        dis = np.exp(-1.0 * (dis-1))
+        return dis[None]
+    
     def __getitem__(self, idx):
         img_name, mask_name = self.imgs[idx], self.labels[idx]
         
@@ -33,8 +44,6 @@ class Dataset(torch.utils.data.Dataset):
         mask = []
         for i in range(self.num_classes):
             mask.append(cv2.imread(f'./inputs/{mask_name}', cv2.IMREAD_GRAYSCALE)[..., None])
-            # mask.append(cv2.imread(os.path.join(self.mask_dir, #str(i),
-            #             img_id + self.mask_ext), cv2.IMREAD_GRAYSCALE)[..., None])
         mask = np.dstack(mask)
         mask = np.array(Image.fromarray(mask[:,:,0]).resize((256, 256), resample=Image.NEAREST))[:,:,None]
         #mask = cv2.resize(mask, (256,256))
@@ -50,7 +59,13 @@ class Dataset(torch.utils.data.Dataset):
         task_id = ds2task_ids[img_name.split('/')[0]]
         if img.shape[1:] != mask.shape[1:]:
             print(img)
-        return img, mask, {'img_id': img_name.split('/')[-1].replace('.png', ''), 'task_id' : task_id}
+        
+        dics = {'image' : img, 'mask': mask}
+        if self.mode == 'with_boundary':    
+            dics['boundary_distance_map'] = self.get_boundary_map(mask)      # [256, 256]
+        
+        return dics, {'img_id': img_name.split('/')[-1].replace('.png', ''), 'task_id' : task_id}
+       # return img, mask, {'img_id': img_name.split('/')[-1].replace('.png', ''), 'task_id' : task_id}
 
 class Dataset2(torch.utils.data.Dataset):
     def __init__(self, ids, root, img_ext, mask_ext, num_classes, transform=None):

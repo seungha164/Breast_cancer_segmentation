@@ -19,7 +19,7 @@ from src.utils import str2bool
 from src.network.CMUNet import CMUNet
 import solver
 import json
-
+from src.network.modeling import Model_R2C
 from torch.utils.tensorboard import SummaryWriter
 
 LOSS_NAMES = losses.__all__
@@ -85,18 +85,57 @@ def parse_args():
     config = parser.parse_args()
     return config
 
-def loading_data(ds_root, json_file):
+def loading_DaLoader(ds_root, json_file, config):
     with open(f"{ds_root}/{json_file}", 'r') as f:
         data = json.load(f)
     trains = {'images': data['train_images'], 'labels': data['train_labels']}
     valids = {'images': data['valid_images'], 'labels': data['valid_labels']}
     
-    return trains, valids   # {'train' : , 'valid' : valids}
+    train_transform = Compose([
+        RandomRotate90(),
+        Flip(),     #transforms.Flip(),
+        Normalize(),
+    ])
+    val_transform = Compose([
+        Resize(config['input_h'], config['input_w']),
+        transforms.Normalize(),
+    ])
+    
+    train_dataset = Dataset(
+        ids=trains,
+        root = './inputs',
+        mode = 'with_boundary' if config['name'] == 'CMUnet_R2C' else 'base',
+        num_classes=config['num_classes'],
+        transform=train_transform
+        )
+    
+    val_dataset = Dataset(
+        ids=valids,
+        root = './inputs',
+        mode = 'with_boundary' if config['name'] == 'CMUnet_R2C' else 'base',
+        num_classes=config['num_classes'],
+        transform=val_transform)
+
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset,
+        batch_size=config['batch_size'],
+        shuffle=True,
+        num_workers=config['num_workers'],
+        drop_last=True)
+    val_loader = torch.utils.data.DataLoader(
+        val_dataset,
+        batch_size=config['batch_size'],
+        shuffle=False,
+        num_workers=config['num_workers'],
+        drop_last=False)
+
+    return train_loader, val_loader   # {'train' : , 'valid' : valids}
     
 def main():
+    writer = SummaryWriter()
     config = vars(parse_args())
     #! hyperparameter ---------------------------------------------
-    # name = CMUnet(Base), CMUnet_Boundary(only boundary)
+    # name = CMUnet(Base), CMUnet_R2C(Boundary Distance map -> Mask)
     config['name']          = 'CMUnet'
     config['dataset_json']  = 'final/BUSI_STU_UDIAT_QAMEBI_fold-0.json'
     config['loss']          = 'BCEDiceLoss'
@@ -121,8 +160,12 @@ def main():
     cudnn.benchmark = True
 
     #* ===== create model =====
-    model = CMUNet(img_ch=3, output_ch=1, l=7, k=7)
+    if config['name'] == 'CMUnet':
+        model = CMUNet(img_ch=3, output_ch=1, l=7, k=7)
+    elif config['name'] == 'CMUnet_R2C':
+        model = Model_R2C(img_ch=3, output_ch=1, l=7, k=7)
     model = model.cuda()
+    #* =======================
     params = filter(lambda p: p.requires_grad, model.parameters())
     if config['optimizer'] == 'Adam':
         optimizer = optim.Adam(
@@ -148,51 +191,8 @@ def main():
         raise NotImplementedError
 
     #* ===== Data loading code =====
-    trains, valids = loading_data('./configs', config['dataset_json'])
-    train_transform = Compose([
-        RandomRotate90(),
-        Flip(),     #transforms.Flip(),
-        Normalize(),
-    ])
-
-    val_transform = Compose([
-        Resize(config['input_h'], config['input_w']),
-        transforms.Normalize(),
-    ])
-
-    train_dataset = Dataset(
-        ids=trains,
-        root = './inputs',
-        #img_dir=os.path.join('inputs', config['dataset'], 'imagesTr'),
-        #mask_dir=os.path.join('inputs', config['dataset'], 'labelsTr'),
-        img_ext=config['img_ext'],
-        mask_ext=config['mask_ext'],
-        num_classes=config['num_classes'],
-        transform=train_transform)
+    train_loader, val_loader = loading_DaLoader('./configs', config['dataset_json'], config)
     
-    val_dataset = Dataset(
-        ids=valids,
-        root = './inputs',
-        #img_dir=os.path.join('inputs', config['dataset'], 'imagesTr'),
-        #mask_dir=os.path.join('inputs', config['dataset'], 'labelsTr'),
-        img_ext=config['img_ext'],
-        mask_ext=config['mask_ext'],
-        num_classes=config['num_classes'],
-        transform=val_transform)
-
-    train_loader = torch.utils.data.DataLoader(
-        train_dataset,
-        batch_size=config['batch_size'],
-        shuffle=True,
-        num_workers=config['num_workers'],
-        drop_last=True)
-    val_loader = torch.utils.data.DataLoader(
-        val_dataset,
-        batch_size=config['batch_size'],
-        shuffle=False,
-        num_workers=config['num_workers'],
-        drop_last=False)
-
     #* ============
     log = OrderedDict([
         ('epoch', []),
@@ -208,10 +208,8 @@ def main():
     for epoch in range(config['epochs']):
         print('Epoch [%d/%d]' % (epoch, config['epochs']))
 
-        # train for one epoch
-        train_log = solver.train(train_loader, model, criterion, optimizer)
-        # evaluate on validation set
-        val_log = solver.validate(val_loader, model, criterion)
+        train_log   = solver.train(train_loader, model, criterion, optimizer, modelName = config['name'], writer=writer, epoch=epoch, totalepoch=config['epochs'])                       # train for one epoch
+        val_log     = solver.validate(val_loader, model, criterion, modelName = config['name'], writer=writer, epoch=epoch, totalepoch=config['epochs'])    # evaluate on validation set
 
         if config['scheduler'] == 'CosineAnnealingLR':
             scheduler.step()
@@ -246,6 +244,8 @@ def main():
             break
         torch.cuda.empty_cache()
 
+    writer.flush()
+    writer.close()
 
 if __name__ == '__main__':
     main()
