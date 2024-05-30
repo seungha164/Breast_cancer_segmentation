@@ -15,13 +15,13 @@ ds2task_ids = {
 }
 
 class Dataset(torch.utils.data.Dataset):
-    def __init__(self, ids, root, img_ext, mask_ext, num_classes, mode, transform=None):
+    def __init__(self, ids, root, num_classes, mode, transform=None):
         self.imgs    = ids['images']
         self.labels  = ids['labels']
         self.root = root,
         self.num_classes = num_classes
         self.transform = transform
-        self.mode
+        self.mode = mode
         
     def __len__(self):
         return len(self.imgs)

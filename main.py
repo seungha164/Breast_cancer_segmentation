@@ -137,7 +137,7 @@ def main():
     #! hyperparameter ---------------------------------------------
     # name = CMUnet(Base), CMUnet_R2C(Boundary Distance map -> Mask)
     config['name']          = 'CMUnet'
-    config['dataset_json']  = 'final/BUSI_STU_UDIAT_QAMEBI_fold-0.json'
+    config['dataset_json']  = 'BU_ST_UD_QA.json'
     config['loss']          = 'BCEDiceLoss'
     
     config['save_root']     = f"{config['name']}/" + config['dataset_json'].replace('split_', '').replace('.json', '') + str(len(glob(f'./checkpoint/{config["name"]}*/')))
