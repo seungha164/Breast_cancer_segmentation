@@ -93,12 +93,12 @@ def loading_data(ds_root, json_file):
     
     return trains, valids   # {'train' : , 'valid' : valids}
     
-def main():
+def main(foldN):
     config = vars(parse_args())
     #! hyperparameter ---------------------------------------------
     # name = CMUnet(Base), CMUnet_Boundary(only boundary)
     config['name']          = 'CMUnet'
-    config['dataset_json']  = 'final/BUSI_STU_UDIAT_QAMEBI_fold-0.json'
+    config['dataset_json']  = f'final/BUSI_STU_UDIAT_QAMEBI_fold-{foldN}.json'
     config['loss']          = 'BCEDiceLoss'
     
     config['save_root']     = f"{config['name']}/" + config['dataset_json'].replace('split_', '').replace('.json', '') + str(len(glob(f'./checkpoint/{config["name"]}*/')))
@@ -169,7 +169,6 @@ def main():
         mask_ext=config['mask_ext'],
         num_classes=config['num_classes'],
         transform=train_transform)
-    
     val_dataset = Dataset(
         ids=valids,
         root = './inputs',
@@ -248,4 +247,6 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    for fold in range(5):
+        print(f'============================= fold {fold} =============================')
+        main(foldN=fold)
