@@ -27,12 +27,16 @@ class BoundarywithMaskLoss(nn.Module):
         super().__init__()
         self.segLoss = BCEDiceLoss()
         self.bdrLoss = nn.MSELoss()
-        
+    
+    def boundary_loss(self, pred, gt):
+        bce = F.binary_cross_entropy_with_logits(pred, gt)
+        return self.bdrLoss(pred, gt) + bce
+    
     def forward(self, inputs, target, target_ditance, task_ids, t, N, Taskloss_flg=False):
         #* 1. boundary loss
-        loss_boundary = self.bdrLoss((inputs['dis'].to(torch.float64)), target_ditance.to(dtype = torch.float64, device=inputs['dis'].device))
+        loss_boundary = self.boundary_loss((inputs['dis'].to(torch.float64)), target_ditance.to(dtype = torch.float64, device=inputs['dis'].device))
         #* 2. mask loss
-        loss_mask = self.segLoss(inputs['mask'], target, task_ids, Taskloss_flg)
+        loss_mask = self.segLoss(inputs['mask'], target)
         
         return  (1 - t/N) * loss_boundary + (t/N) * loss_mask
     

@@ -115,22 +115,14 @@ def main():
     config = vars(parse_args())
     #! hyperparameter ---------------------------------------------
     # name = CMUnet(Base), CMUnet_R2C(Boundary Distance map -> Mask)
-    config['name']          = 'CMUnet'
-    config['dataset_json']  = 'BU_ST_UD_QA.json'
-    config['loss']          = 'BCEDiceLoss'
-    
-    config['save_root']     = f"{config['name']}/" + config['dataset_json'].replace('split_', '').replace('.json', '') + str(len(glob(f'./checkpoint/{config["name"]}*/')))
+    config['name']              = 'CMUnet'
+    config['train_data']        = 'BU_ST_UD_QA.json'
+    config['test_data']         = 'BU_ST_UD_QA.json'
+    config['loss']              = 'BCEDiceLoss'
+    config['save_result_root']  = f'./result/{config["train_data"].replace(".json", "")}/{config["test_data"].replace(".json", "")}'
+    config['checkpoint_path']     = f"{config['name']}/{config['train_data'].replace('split_', '').replace('.json', '')}"
     #! ------------------------------------------------------------
-    os.makedirs('checkpoint/%s' % config['save_root'], exist_ok=True)
-
-    # print('-' * 20)
-    # for key in config:
-    #     print('%s: %s' % (key, config[key]))
-    # print('-' * 20)
-
-    with open('checkpoint/%s/config.yml' % config['save_root'], 'w') as f:
-        yaml.dump(config, f)
-
+   
     #* ===== define loss function (criterion) =====
     if config['loss'] == 'BCEWithLogitsLoss':
         criterion = nn.BCEWithLogitsLoss().cuda()
@@ -143,6 +135,7 @@ def main():
         model = CMUNet(img_ch=3, output_ch=1, l=7, k=7)
     elif config['name'] == 'CMUnet_R2C':
         model = Model_R2C(img_ch=3, output_ch=1, l=7, k=7)
+    model.load_state_dict(torch.load('checkpoint/%s/model.pth' % config['checkpoint_path']))
     model = model.cuda()
     #* =======================
     params = filter(lambda p: p.requires_grad, model.parameters())
@@ -170,10 +163,10 @@ def main():
         raise NotImplementedError
 
     #* ===== Data loading code =====
-    val_loader = loading_DataLoader('./configs', config['dataset_json'], config)
+    val_loader = loading_DataLoader('./configs', config['test_data'], config)
     
     #* ============ validate
-    val_log     = solver.validate(val_loader, model, criterion, modelName = config['name'], totalepoch=config['epochs'], save=True)
+    val_log     = solver.validate(val_loader, model, criterion, modelName = config['name'], totalepoch=config['epochs'], saveRoot = config['save_result_root'], save=True)
     print('val_loss %.4f - val_iou %.4f - val_dice %.4f - val_SE %.4f - val_PC %.4f - val_F1 %.4f - val_SP %.4f - val_ACC %.4f'
             % ( val_log['loss'], val_log['iou'], val_log['dice'], val_log['SE'],
                val_log['PC'], val_log['F1'], val_log['SP'], val_log['ACC']))

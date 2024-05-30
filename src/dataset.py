@@ -9,7 +9,8 @@ import scipy.ndimage as ndi
 ds2task_ids = {
     'BUSI' : 0,
     'STU' : 1,
-    'TestSet' : 2, 
+    'TestSet' : 2,
+    'KUtest' : 2, 
     'UDIAT' : 3,
     'QAMEBI' : 4
 }
@@ -51,6 +52,8 @@ class Dataset(torch.utils.data.Dataset):
             augmented = self.transform(image=img, mask=mask)
             img = augmented['image']
             mask = augmented['mask']
+            
+        distancemap = self.get_boundary_map(mask)
         
         img = img.astype('float32') / 255
         img = img.transpose(2, 0, 1)
@@ -62,7 +65,7 @@ class Dataset(torch.utils.data.Dataset):
         
         dics = {'image' : img, 'mask': mask}
         if self.mode == 'with_boundary':    
-            dics['boundary_distance_map'] = self.get_boundary_map(mask)      # [256, 256]
+            dics['boundary_distance_map'] = distancemap      # [256, 256]
         
         return dics, {'img_id': img_name.split('/')[-1].replace('.png', ''), 'task_id' : task_id}
        # return img, mask, {'img_id': img_name.split('/')[-1].replace('.png', ''), 'task_id' : task_id}

@@ -75,13 +75,13 @@ def validate(val_loader, model, criterion, modelName, writer = None, saveRoot = 
             output = model(input)
             if modelName == 'CMUnet':
                 loss = criterion(output, target)
-                iou, dice, _, _, _, _, _ = iou_score(output, target)
+                iou, dice, SE, PC, F1, SP, ACC = iou_score(output, target)
             elif modelName == 'CMUnet_R2C':
                 target_boundary_distance_map = dics['boundary_distance_map'].cuda()
                 loss = criterion(output, target, target_boundary_distance_map, ids['task_id'], t=epoch, N=totalepoch)
-                iou, dice, _, _, _, _, _ = iou_score(output['mask'], target)
+                iou, dice, SE, PC, F1, SP, ACC = iou_score(output['mask'], target)
             
-            iou, dice, SE, PC, F1, SP, ACC = iou_score(output, target)
+            #iou, dice, SE, PC, F1, SP, ACC = iou_score(output, target)
             if writer != None:
                 writer.add_scalar('Loss/Val', loss, epoch)
                 writer.add_scalar('iou/Val', iou, epoch)
@@ -89,14 +89,14 @@ def validate(val_loader, model, criterion, modelName, writer = None, saveRoot = 
             if save:
                 if modelName == 'CMUnet':
                     cv2.imwrite(f'{saveRoot}/predictions/{id2task[ids["task_id"].item()]}_{ids["img_id"][0]}.png', (torch.sigmoid(output).data.cpu().numpy() > 0.5)[0, 0].astype(np.float32) * 255)
-                    save_scores.append([ids['img_id'][0], iou, dice, SE, PC, F1, SP, ACC])  #!
                 elif modelName == 'CMUnet_distancemap':
                     plt.axis('off')
                     plt.imshow((output['dis']).data.cpu().numpy()[0, 0], cmap='bwr')
                     plt.savefig(f'{saveRoot}/predictions/{id2task[ids["task_id"].item()]}_{ids["img_id"][0]}_b.png', bbox_inches='tight')
                     #cv2.imwrite(f'{saveRoot}/predictions/{id2task[name["task_id"].item()]}_{name["img_id"][0]}_b.png', (output['dis']).data.cpu().numpy()[0, 0].astype(np.float32) * 255)
                     cv2.imwrite(f'{saveRoot}/predictions/{id2task[ids["task_id"].item()]}_{ids["img_id"][0]}.png', (torch.sigmoid(output['mask']).data.cpu().numpy() > 0.5)[0, 0].astype(np.float32) * 255)
-                    save_scores.append([ids['img_id'][0], iou, dice, SE, PC, F1, SP, ACC])  #!
+                
+                save_scores.append([f'{id2task[ids["task_id"].item()]}_{ids["img_id"][0]}', id2task[ids["task_id"].item()], iou, dice, SE, PC, F1, SP, ACC])  #!
                 
             avg_meters['loss'].update(loss.item(), input.size(0))
             avg_meters['iou'].update(iou, input.size(0))
@@ -108,7 +108,7 @@ def validate(val_loader, model, criterion, modelName, writer = None, saveRoot = 
             avg_meters['ACC'].update(ACC, input.size(0))
 
     if save:
-        df = pd.DataFrame(save_scores, columns=['ID', 'iou', 'dice', 'SE', 'PE', 'F1', 'SP', 'ACC'])
+        df = pd.DataFrame(save_scores, columns=['ID', 'task', 'iou', 'dice', 'SE', 'PE', 'F1', 'SP', 'ACC'])
         df.to_csv(f'{saveRoot}/result.csv')
     return OrderedDict([('loss', avg_meters['loss'].avg),
                         ('iou', avg_meters['iou'].avg),
