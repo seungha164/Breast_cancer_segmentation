@@ -141,7 +141,7 @@ def main():
     config['dataset_json']  = 'BU_ST_UD_QA.json'
     config['loss']          = 'BoundarywithMaskLoss'
     
-    config['save_root']     = f"{config['name']}/" + config['dataset_json'].replace('split_', '').replace('.json', '') + str(len(glob(f'./checkpoint/{config["name"]}*/')))
+    config['save_root']     = f"{config['name']}/" + config['dataset_json'].replace('split_', '').replace('.json', '')
     #! ------------------------------------------------------------
     os.makedirs('checkpoint/%s' % config['save_root'], exist_ok=True)
 

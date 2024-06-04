@@ -89,6 +89,8 @@ def validate(val_loader, model, criterion, modelName, writer = None, saveRoot = 
             if save:
                 if modelName == 'CMUnet':
                     cv2.imwrite(f'{saveRoot}/predictions/{id2task[ids["task_id"].item()]}_{ids["img_id"][0]}.png', (torch.sigmoid(output).data.cpu().numpy() > 0.5)[0, 0].astype(np.float32) * 255)
+                elif modelName == 'CMUnet_R2C':
+                    cv2.imwrite(f'{saveRoot}/predictions/{id2task[ids["task_id"].item()]}_{ids["img_id"][0]}.png', (torch.sigmoid(output['mask']).data.cpu().numpy() > 0.5)[0, 0].astype(np.float32) * 255)
                 elif modelName == 'CMUnet_distancemap':
                     plt.axis('off')
                     plt.imshow((output['dis']).data.cpu().numpy()[0, 0], cmap='bwr')

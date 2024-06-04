@@ -20,7 +20,7 @@ from src.network.CMUNet import CMUNet
 import solver
 import json
 from src.network.modeling import Model_R2C
-
+from torch.utils.tensorboard import SummaryWriter
 
 LOSS_NAMES = losses.__all__
 LOSS_NAMES.append('BCEWithLogitsLoss')
@@ -33,7 +33,7 @@ def parse_args():
                         help='model name')
     parser.add_argument('--epochs', default=300, type=int, metavar='N',
                         help='number of total epochs to run')
-    parser.add_argument('-b', '--batch_size', default=1, type=int,
+    parser.add_argument('-b', '--batch_size', default=8, type=int,
                         metavar='N', help='mini-batch size (default: 8)')
     # model
     parser.add_argument('--deep_supervision', default=False, type=str2bool)
@@ -85,22 +85,43 @@ def parse_args():
     config = parser.parse_args()
     return config
 
-def loading_DataLoader(ds_root, json_file, config):
+def loading_DaLoader(ds_root, json_file, config):
     with open(f"{ds_root}/{json_file}", 'r') as f:
         data = json.load(f)
-        
-    valids = {'images': data['test_images'], 'labels': data['test_labels']}
+    trains = {'images': data['train_images'], 'labels': data['train_labels']}
+    valids = {'images': data['valid_images'], 'labels': data['valid_labels']}
     
+    train_transform = Compose([
+        RandomRotate90(),
+        Flip(),     #transforms.Flip(),
+        Normalize(),
+    ])
     val_transform = Compose([
         Resize(config['input_h'], config['input_w']),
         transforms.Normalize(),
     ])
+    
+    train_dataset = Dataset(
+        ids=trains,
+        root = './inputs',
+        mode = 'with_boundary' if config['name'] == 'CMUnet_R2C' else 'base',
+        num_classes=config['num_classes'],
+        transform=train_transform
+        )
+    
     val_dataset = Dataset(
         ids=valids,
         root = './inputs',
         mode = 'with_boundary' if config['name'] == 'CMUnet_R2C' else 'base',
         num_classes=config['num_classes'],
         transform=val_transform)
+
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset,
+        batch_size=config['batch_size'],
+        shuffle=True,
+        num_workers=config['num_workers'],
+        drop_last=True)
     val_loader = torch.utils.data.DataLoader(
         val_dataset,
         batch_size=config['batch_size'],
@@ -108,21 +129,30 @@ def loading_DataLoader(ds_root, json_file, config):
         num_workers=config['num_workers'],
         drop_last=False)
 
-    return val_loader   # {'train' : , 'valid' : valids}45000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+    return train_loader, val_loader   # {'train' : , 'valid' : valids}
     
 def main():
-    
+    writer = SummaryWriter()
     config = vars(parse_args())
     #! hyperparameter ---------------------------------------------
     # name = CMUnet(Base), CMUnet_R2C(Boundary Distance map -> Mask)
-    config['name']              = 'CMUnet_R2C'
-    config['train_data']        = 'BU_ST_UD_QA.json'
-    config['test_data']         = 'BU_ST_UD_QA.json'
-    config['loss']              = 'BoundarywithMaskLoss'
-    config['save_result_root']  = f'./result/{config["name"]}/{config["train_data"].replace(".json", "")}/{config["test_data"].replace(".json", "")}'
-    config['checkpoint_path']     = f"{config['name']}/{config['train_data'].replace('split_', '').replace('.json', '')}"
+    #* CMUnet => BCEDiceLoss    | CMUnet_R2C => BoundarywithMaskLoss
+    config['name']          = 'CMUnet_R2C'
+    config['dataset_json']  = 'BU_ST_UD_QA.json'
+    config['loss']          = 'BoundarywithMaskLoss'
+    
+    config['save_root']     = f"{config['name']}/" + config['dataset_json'].replace('split_', '').replace('.json', '')
     #! ------------------------------------------------------------
-   
+    os.makedirs('checkpoint/%s' % config['save_root'], exist_ok=True)
+
+    # print('-' * 20)
+    # for key in config:
+    #     print('%s: %s' % (key, config[key]))
+    # print('-' * 20)
+
+    with open('checkpoint/%s/config.yml' % config['save_root'], 'w') as f:
+        yaml.dump(config, f)
+
     #* ===== define loss function (criterion) =====
     if config['loss'] == 'BCEWithLogitsLoss':
         criterion = nn.BCEWithLogitsLoss().cuda()
@@ -135,7 +165,7 @@ def main():
         model = CMUNet(img_ch=3, output_ch=1, l=7, k=7)
     elif config['name'] == 'CMUnet_R2C':
         model = Model_R2C(img_ch=3, output_ch=1, l=7, k=7)
-    model.load_state_dict(torch.load('checkpoint/%s/model.pth' % config['checkpoint_path']))
+        model.load_state_dict(torch.load('checkpoint/%s/model.pth' % config['save_root']))
     model = model.cuda()
     #* =======================
     params = filter(lambda p: p.requires_grad, model.parameters())
@@ -163,13 +193,62 @@ def main():
         raise NotImplementedError
 
     #* ===== Data loading code =====
-    val_loader = loading_DataLoader('./configs', config['test_data'], config)
+    train_loader, val_loader = loading_DaLoader('./configs', config['dataset_json'], config)
     
-    #* ============ validate
-    val_log     = solver.validate(val_loader, model, criterion, modelName = config['name'], totalepoch=config['epochs'], saveRoot = config['save_result_root'], save=True)
-    print('val_loss %.4f - val_iou %.4f - val_dice %.4f - val_SE %.4f - val_PC %.4f - val_F1 %.4f - val_SP %.4f - val_ACC %.4f'
-            % ( val_log['loss'], val_log['iou'], val_log['dice'], val_log['SE'],
+    #* ============
+    log = OrderedDict([
+        ('epoch', []),
+        ('lr', []),
+        ('loss', []),
+        ('iou', []),
+        ('val_loss', []),
+        ('val_iou', []),
+        ('val_dice', []),
+    ])
+    best_iou = 0
+    trigger = 0
+    config['epochs'] = config['epochs'] + 300
+    for epoch in range(300, config['epochs'] + 300):
+        print('Epoch [%d/%d]' % (epoch, config['epochs']))
+
+        train_log   = solver.train(train_loader, model, criterion, optimizer, modelName = config['name'], writer=writer, epoch=epoch, totalepoch=config['epochs'])                       # train for one epoch
+        val_log     = solver.validate(val_loader, model, criterion, modelName = config['name'], writer=writer, epoch=epoch, totalepoch=config['epochs'])    # evaluate on validation set
+
+        if config['scheduler'] == 'CosineAnnealingLR':
+            scheduler.step()
+        elif config['scheduler'] == 'ReduceLROnPlateau':
+            scheduler.step(val_log['loss'])
+
+        print('loss %.4f - iou %.4f - val_loss %.4f - val_iou %.4f - val_dice %.4f - val_SE %.4f - val_PC %.4f - val_F1 %.4f - val_SP %.4f - val_ACC %.4f'
+            % (train_log['loss'], train_log['iou'], val_log['loss'], val_log['iou'], val_log['dice'], val_log['SE'],
                val_log['PC'], val_log['F1'], val_log['SP'], val_log['ACC']))
+
+        log['epoch'].append(epoch)
+        log['lr'].append(config['lr'])
+        log['loss'].append(train_log['loss'])
+        log['iou'].append(train_log['iou'])
+        log['val_loss'].append(val_log['loss'])
+        log['val_iou'].append(val_log['iou'])
+        log['val_dice'].append(val_log['dice'])
+
+        pd.DataFrame(log).to_csv('checkpoint/%s/log.csv' % config['save_root'], index=False)
+
+        trigger += 1
+
+        if val_log['iou'] > best_iou:
+            torch.save(model.state_dict(), 'checkpoint/%s/model.pth' % config['save_root'])
+            best_iou = val_log['iou']
+            print("=> saved best model")
+            trigger = 0
+
+        # early stopping
+        if config['early_stopping'] >= 0 and trigger >= config['early_stopping']:
+            print("=> early stopping")
+            break
+        torch.cuda.empty_cache()
+
+    writer.flush()
+    writer.close()
 
 if __name__ == '__main__':
     main()
